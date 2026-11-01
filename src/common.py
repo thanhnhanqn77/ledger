@@ -27,7 +27,7 @@ def public_label(value):
 
 
 def load_dataset(path):
-    """Load JSONL dataset (FOLIO or ProofWriter format)."""
+    """Load JSONL dataset (FOLIO, ProofWriter, or ProntoQA format)."""
     rows = []
     for line in Path(path).read_text(encoding='utf-8-sig').splitlines():
         if not line.strip():
@@ -54,6 +54,28 @@ def load_dataset(path):
     if not rows or len({str(r['example_id']) for r in rows}) != len(rows):
         raise ValueError('Empty dataset or duplicate example IDs')
     return rows
+
+
+def resolve_dataset(dataset_or_path):
+    """
+    Resolve dataset name ('folio', 'proofwriter', 'prontoqa') or file path
+    to a tuple of (canonical_name, Path).
+    """
+    if not dataset_or_path:
+        return 'folio', DATA_DIR / 'folio_v2_validation.jsonl'
+    
+    val_str = str(dataset_or_path).strip().lower()
+    if val_str in ('prontoqa', 'pronto_qa') or 'prontoqa' in val_str:
+        return 'prontoqa', DATA_DIR / 'prontoqa_dev.jsonl'
+    elif val_str in ('proofwriter', 'pw') or 'proofwriter' in val_str:
+        return 'proofwriter', DATA_DIR / 'proofwriter_test_depth5_400.jsonl'
+    elif val_str in ('folio', 'folio_v2') or 'folio' in val_str:
+        return 'folio', DATA_DIR / 'folio_v2_validation.jsonl'
+    
+    p = Path(dataset_or_path)
+    if not p.is_absolute():
+        p = PACKAGE_ROOT / p
+    return 'custom', p
 
 
 def inference_row(row):

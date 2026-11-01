@@ -27,7 +27,7 @@ BASE_DIR = Path(__file__).resolve().parent
 if str(BASE_DIR) not in sys.path:
     sys.path.insert(0, str(BASE_DIR))
 
-from src.common import LABELS, digest, load_dataset, read_json, write_json
+from src.common import LABELS, digest, load_dataset, read_json, write_json, resolve_dataset
 from src.hybrid_pipeline import OursHybridPipeline
 
 
@@ -36,9 +36,15 @@ def parse_args():
         description="Run Ledger & SymbRoute Dual-Solver Reasoning Pipeline (Z3 Fast-Path + Symbolic Fallback)"
     )
     parser.add_argument(
+        "--dataset",
+        choices=("folio", "proofwriter", "prontoqa"),
+        default=None,
+        help="Target benchmark dataset ('folio', 'proofwriter', or 'prontoqa'). Automatically selects dataset and defaults.",
+    )
+    parser.add_argument(
         "--data_file",
-        default="data/folio_v2_validation.jsonl",
-        help="Path to JSONL dataset (e.g., data/folio_v2_validation.jsonl or data/proofwriter_test_depth5_400.jsonl)",
+        default=None,
+        help="Path to JSONL dataset (e.g., data/folio_v2_validation.jsonl, data/proofwriter_test_depth5_400.jsonl, or data/prontoqa_dev.jsonl)",
     )
     parser.add_argument(
         "--model_name",
@@ -103,8 +109,8 @@ def compute_summary(results):
     evaluated = [r for r in completed if r.get("correct") is not None]
     correct = sum(1 for r in evaluated if r.get("correct"))
 
-    clover_z3_count = sum(1 for r in completed if r.get("solver_path") == "clover_z3")
-    symbcot_fallback_count = sum(1 for r in completed if r.get("solver_path") == "symbcot_fallback")
+    clover_z3_count = sum(1 for r in completed if r.get("solver_path") in ("clover_z3", "z3_smt"))
+    symbcot_fallback_count = sum(1 for r in completed if r.get("solver_path") in ("symbcot_fallback", "symbolic_fallback"))
 
     acc = (correct / len(evaluated) * 100) if evaluated else 0.0
 
@@ -134,18 +140,21 @@ def compute_summary(results):
 def main():
     args = parse_args()
 
-    data_path = Path(args.data_file)
+    # Dataset resolution branch: supports --dataset prontoqa / folio / proofwriter or explicit --data_file
+    dataset_name, resolved_path = resolve_dataset(args.dataset or args.data_file)
+    data_path = Path(args.data_file) if args.data_file else resolved_path
+
     if not data_path.exists():
         print(f"Error: dataset file not found: {data_path}")
         sys.exit(1)
 
+    print(f"Benchmark Dataset: {dataset_name.upper()}")
     print(f"Loading dataset from: {data_path}")
     rows = load_dataset(data_path)
     if args.limit > 0:
         rows = rows[: args.limit]
     print(f"Loaded {len(rows)} samples for evaluation.")
 
-    # Output directory
     # Output directory (relative path, avoiding local machine roots)
     if args.run_dir:
         run_dir = Path(args.run_dir)
@@ -157,6 +166,7 @@ def main():
     print(f"Checkpoints and logs directory: {run_dir}")
 
     config = {
+        "dataset_name": dataset_name,
         "model_name": args.model_name,
         "host": args.host,
         "max_tokens": args.max_tokens,
@@ -176,6 +186,22 @@ def main():
         del saved_config["key_file"]
     saved_config["auth"] = "environment_variable" if (args.api_key or os.getenv("OLLAMA_API_KEY")) else "keys_file"
     write_json(run_dir / "config.json", saved_config)
+
+    # Preload benchmark FOL translations for z3_only mode when LLM is unavailable
+    benchmark_map = {}
+    if args.mode in ("z3_only", "clover_only"):
+        config["allow_no_llm"] = True
+        folder_map = {"prontoqa": "ProntoQA", "proofwriter": "PROOFWRITER", "folio": "FOLIO"}
+        target_folder = folder_map.get(dataset_name)
+        if target_folder:
+            log_p = BASE_DIR / "logs" / target_folder / "symbroute.json"
+            if log_p.exists():
+                try:
+                    log_data = read_json(log_p)
+                    for r in log_data.get("results", []):
+                        benchmark_map[str(r.get("id"))] = r
+                except Exception:
+                    pass
 
     # Initialize Pipeline
     print(f"\nInitializing OursHybridPipeline (Mode: {args.mode.upper()})...")
@@ -205,6 +231,15 @@ def main():
         if idx in results_map and results_map[idx].get("status") == "complete" and not args.retry_errors:
             print(f"[{i+1}/{len(rows)}] Sample #{idx}: already cached as completed. Skipping.")
             continue
+
+        # Preload translation if available from benchmark log
+        ex_id = str(row.get("example_id"))
+        if ex_id in benchmark_map:
+            b_res = benchmark_map[ex_id]
+            if "translation_source" in b_res and "translation_source" not in row:
+                row["translation_source"] = b_res["translation_source"]
+            if "translation" in b_res and "translation" not in row:
+                row["translation"] = b_res["translation"]
 
         started = time.monotonic()
         try:

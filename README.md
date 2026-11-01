@@ -68,6 +68,7 @@ ledger_symbroute_anonymous/
 ├── data/                              # Benchmark evaluation datasets
 │   ├── folio_v2_validation.jsonl     # Complete FOLIO v2 evaluation split (203 problems)
 │   ├── proofwriter_test_depth5_400.jsonl # Complete ProofWriter Depth-5 test split (400 problems)
+│   ├── prontoqa_dev.jsonl            # Complete ProntoQA evaluation split (500 problems)
 │   └── folio_train_fewshots.jsonl    # Training few-shot demonstration bank
 ├── logs/                              # Experimental run logs matching paper numbers
 │   ├── FOLIO/                         # 203 evaluated instances across all methods
@@ -79,6 +80,14 @@ ledger_symbroute_anonymous/
 │   │   ├── symbcot_ledger.json
 │   │   └── symbroute.json
 │   ├── PROOFWRITER/                   # 400 evaluated instances across all methods
+│   │   ├── direct.json
+│   │   ├── cot.json
+│   │   ├── clover.json
+│   │   ├── symbcot.json
+│   │   ├── clover_ledger.json
+│   │   ├── symbcot_ledger.json
+│   │   └── symbroute.json
+│   ├── ProntoQA/                      # 500 evaluated instances across all methods
 │   │   ├── direct.json
 │   │   ├── cot.json
 │   │   ├── clover.json
@@ -173,15 +182,15 @@ python reproduce_results.py --table 4
 ### Expected Output Summary
 
 #### Table 1: Main Task Accuracy Across Benchmarks
-| Method / Architecture | FOLIO v2 (N=203) | ProofWriter Depth-5 (N=400) |
-| :--- | :--- | :--- |
-| Direct Inference | 150 / 203 (73.89%) | 290 / 400 (72.50%) |
-| Chain-of-Thought (CoT) | 170 / 203 (83.74%) | 359 / 400 (89.75%) |
-| Baseline Clover (SMT) | 158 / 203 (81.03%) | 377 / 400 (95.44%) |
-| Baseline SymbCoT | 175 / 203 (86.21%) | 366 / 400 (91.50%) |
-| Clover + Ledger *(Ours)* | 171 / 203 (85.07%) | 395 / 400 (98.75%) |
-| SymbCoT + Ledger *(Ours)* | 178 / 203 (87.68%) | 380 / 400 (95.00%) |
-| **SymbRoute (Ours Hybrid)** | **179 / 203 (88.18%)** | **395 / 400 (98.75%)** |
+| Method / Architecture | FOLIO v2 (N=203) | ProofWriter Depth-5 (N=400) | ProntoQA (N=500) |
+| :--- | :--- | :--- | :--- |
+| Direct Inference | 150 / 203 (73.89%) | 290 / 400 (72.50%) | 494 / 500 (98.80%) |
+| Chain-of-Thought (CoT) | 170 / 203 (83.74%) | 359 / 400 (89.75%) | 500 / 500 (100.00%) |
+| Baseline Clover (SMT) | 158 / 203 (81.03%) | 377 / 400 (95.44%) | 497 / 500 (99.40%) |
+| Baseline SymbCoT | 175 / 203 (86.21%) | 366 / 400 (91.50%) | 500 / 500 (100.00%) |
+| Clover + Ledger *(Ours)* | 171 / 203 (85.07%) | 395 / 400 (98.75%) | 499 / 500 (99.80%) |
+| SymbCoT + Ledger *(Ours)* | 178 / 203 (87.68%) | 380 / 400 (95.00%) | 500 / 500 (100.00%) |
+| **SymbRoute (Ours Hybrid)** | **179 / 203 (88.18%)** | **395 / 400 (98.75%)** | **500 / 500 (100.00%)** |
 
 #### Table 2: Formal Translation Diagnostics (FOLIO v2)
 | Metric | Baseline Clover | Baseline SymbCoT | Ledger *(Ours)* |
@@ -193,12 +202,12 @@ python reproduce_results.py --table 4
 | AST Valid Formula Rate | 81.96% | N/A | **100.00%** (203 / 203) |
 
 #### Table 3: Z3 Formal Verification & Routing Synergy
-| Characteristic | FOLIO v2 (N=203) | ProofWriter Depth-5 (N=400) |
-| :--- | :--- | :--- |
-| Z3 Fast-Path Resolution Rate | 53.69% (109 / 203) | 55.25% (221 / 400) |
-| Z3 Decisive Proof Accuracy | **96.33%** (105 / 109) | **97.74%** (216 / 221) |
-| SymbCoT Fallback Accuracy | 78.72% (74 / 94) | 100.00% (179 / 179) |
-| Dual-Solver Mutual Rescues | 30 Cases (Z3: 12, CoT: 18) | 5 Cases |
+| Characteristic | FOLIO v2 (N=203) | ProofWriter Depth-5 (N=400) | ProntoQA (N=500) |
+| :--- | :--- | :--- | :--- |
+| Z3 Fast-Path Resolution Rate | 53.69% (109 / 203) | 55.25% (221 / 400) | 99.80% (499 / 500) |
+| Z3 Decisive Proof Accuracy | **96.33%** (105 / 109) | **97.74%** (216 / 221) | **100.00%** (499 / 499) |
+| SymbCoT Fallback Accuracy | 78.72% (74 / 94) | 100.00% (179 / 179) | 100.00% (1 / 1) |
+| Dual-Solver Mutual Rescues | 30 Cases (Z3: 12, CoT: 18) | 5 Cases | 1 Case |
 
 #### Table 4: Component Ablation Study on FOLIO v2
 | Ablation Variant | Accuracy (%) | $\Delta$ | Z3 Solved Rate |
@@ -230,21 +239,25 @@ echo "your_api_token_here" > keys.txt
 
 ### Running Inference Commands
 ```bash
-# 1. Run SymbRoute on the first 5 samples of FOLIO v2:
-python run_inference.py --data_file data/folio_v2_validation.jsonl --mode hybrid --limit 5
+# 1. Run SymbRoute on FOLIO v2:
+python run_inference.py --dataset folio --mode hybrid --limit 5
 
 # 2. Run on ProofWriter Depth-5:
-python run_inference.py --data_file data/proofwriter_test_depth5_400.jsonl --mode hybrid --limit 10
+python run_inference.py --dataset proofwriter --mode hybrid --limit 10
 
-# 3. Run Z3 formal solver only:
-python run_inference.py --data_file data/folio_v2_validation.jsonl --mode z3_only --limit 5
+# 3. Run on ProntoQA (Transitive Ontology Benchmark):
+python run_inference.py --dataset prontoqa --mode hybrid --limit 10
 
-# 4. Run Symbolic fallback LLM reasoning backend only:
-python run_inference.py --data_file data/folio_v2_validation.jsonl --mode fallback_only --limit 5
+# 4. Run Z3 formal solver only (0 LLM reasoning tokens):
+python run_inference.py --dataset prontoqa --mode z3_only --limit 5
+
+# 5. Run Symbolic fallback LLM reasoning backend only:
+python run_inference.py --dataset folio --mode fallback_only --limit 5
 ```
 
 ### CLI Options
-* `--data_file`: Relative path to JSONL dataset (default: `data/folio_v2_validation.jsonl`).
+* `--dataset`: Benchmark dataset preset: `folio`, `proofwriter`, or `prontoqa` (default: auto-detected or `folio`).
+* `--data_file`: Explicit path to JSONL dataset (optional override for `--dataset`).
 * `--mode`: Reasoning mode: `hybrid` (default), `z3_only`, `fallback_only`, `dual`.
 * `--model_name`: LLM backbone model (default: `gemma4:31b-cloud`).
 * `--host`: Ollama API base URL (default: `https://ollama.com/api/chat`).
@@ -261,7 +274,9 @@ python run_inference.py --data_file data/folio_v2_validation.jsonl --mode fallba
    * 203 first-order logic reasoning problems with complex quantifier structures, domain axioms, and true/false/uncertain classifications.
 2. **ProofWriter Depth-5 Test Split (`data/proofwriter_test_depth5_400.jsonl`):**
    * 400 deep multi-hop deductive reasoning instances requiring up to 5 chained inference rules.
-3. **FOLIO Training Demonstrations (`data/folio_train_fewshots.jsonl`):**
+3. **ProntoQA Dev Split (`data/prontoqa_dev.jsonl`):**
+   * 500 multi-hop fictitious ontological reasoning problems testing transitive rule chains, taxonomic inheritance, and negation.
+4. **FOLIO Training Demonstrations (`data/folio_train_fewshots.jsonl`):**
    * Curated few-shot translation examples used strictly for in-context demonstration without test data contamination.
 
 ---

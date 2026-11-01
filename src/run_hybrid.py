@@ -12,13 +12,15 @@ if str(CURRENT_DIR.parent) not in sys.path:
     sys.path.insert(0, str(CURRENT_DIR.parent))
 
 from src.common import (LABELS, WORK, digest, load_dataset,
-                         read_json, write_json)
+                         read_json, write_json, resolve_dataset)
 from src.hybrid_pipeline import SymbRoutePipeline, OursHybridPipeline
 
 
 def parse_args():
     parser = argparse.ArgumentParser(description='Run SymbRoute Pipeline (Ledger Translate + Z3 SMT + Symbolic Fallback)')
-    parser.add_argument('--data_file', default='data/proofwriter_test_depth5_400.jsonl',
+    parser.add_argument('--dataset', choices=('folio', 'proofwriter', 'prontoqa'), default=None,
+                        help='Preset dataset shortcut: folio, proofwriter, or prontoqa')
+    parser.add_argument('--data_file', default=None,
                         help='Relative path to dataset JSONL file')
     parser.add_argument('--model_name', default='gemma4:31b-cloud', help='Ollama model name')
     parser.add_argument('--host', default='https://ollama.com/api/chat', help='Ollama API host')
@@ -72,25 +74,29 @@ def compute_summary(results):
 def main():
     args = parse_args()
     
+    # Resolve dataset
+    dataset_name, resolved_path = resolve_dataset(args.dataset or args.data_file or 'data/proofwriter_test_depth5_400.jsonl')
+    data_path = Path(args.data_file) if args.data_file else resolved_path
+
     # Load dataset
-    print(f"Loading dataset from: {args.data_file}")
-    rows = load_dataset(args.data_file)
+    print(f"Dataset: {dataset_name.upper()} | Path: {data_path}")
+    rows = load_dataset(data_path)
     if args.limit > 0:
         rows = rows[:args.limit]
     print(f"Loaded {len(rows)} samples.")
 
-    # Prepare Run Directory
     # Prepare Run Directory (relative path)
     if args.run_dir:
         run_dir = Path(args.run_dir)
     else:
-        dataset_stem = Path(args.data_file).stem
+        dataset_stem = data_path.stem
         model_slug = args.model_name.replace(':', '_').replace('-', '_')
         run_dir = Path('runs') / f"{dataset_stem}_{model_slug}_{args.mode}"
     run_dir.mkdir(parents=True, exist_ok=True)
     print(f"Run Directory: {run_dir}")
 
     config = {
+        'dataset_name': dataset_name,
         'model_name': args.model_name,
         'host': args.host,
         'max_tokens': args.max_tokens,

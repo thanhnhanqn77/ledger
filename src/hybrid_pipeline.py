@@ -18,10 +18,27 @@ class SymbRoutePipeline:
     """
     def __init__(self, config):
         self.config = config
-        self.translator = SharedTranslator(config)
+        self.mode = config.get('mode', 'hybrid')
+        
+        # Resilient LLM initialization (allows prover-only runs without LLM credentials)
+        try:
+            self.translator = SharedTranslator(config)
+        except Exception as e:
+            if self.mode in ('z3_only', 'clover_only') or config.get('allow_no_llm'):
+                self.translator = None
+            else:
+                raise
+        
         self.z3 = OursZ3Solver(config)
         self.clover = self.z3  # Backward-compatibility alias
-        self.fallback = SymbolicFallbackSolver(config)
+        
+        try:
+            self.fallback = SymbolicFallbackSolver(config)
+        except Exception as e:
+            if self.mode in ('z3_only', 'clover_only') or config.get('allow_no_llm'):
+                self.fallback = None
+            else:
+                raise
         self.symbcot = self.fallback  # Backward-compatibility alias
 
     def process_sample(self, row, run_dir=None, mode='hybrid', retry_errors=False):
@@ -37,8 +54,12 @@ class SymbRoutePipeline:
         """
         fingerprint = digest(self.config)
         
-        # 1. Shared Translation Stage
-        if run_dir:
+        # 1. Shared Translation Stage (support preloaded FOL or live translation)
+        if 'translation_source' in row and 'translation' in row:
+            translation_text = row['translation']
+            translation_source = row['translation_source']
+            translation_trace = row.get('translation_trace')
+        elif run_dir and self.translator:
             cached = self.translator.translate_and_cache(row, run_dir, fingerprint, retry_error=retry_errors)
             if cached.get('status') != 'complete':
                 return {
@@ -52,8 +73,17 @@ class SymbRoutePipeline:
             translation_text = cached['translation']
             translation_source = cached['translation_source']
             translation_trace = cached.get('translation_trace')
-        else:
+        elif self.translator:
             translation_text, translation_source, translation_trace = self.translator.translate(row)
+        else:
+            return {
+                'index': row['index'],
+                'id': row['example_id'],
+                'gold_label': row.get('label'),
+                'status': 'error',
+                'error': 'No LLM translator configured and no pre-translated FOL found in row',
+                'solver_path': 'failed_translation'
+            }
 
         record = {
             'index': row['index'],
